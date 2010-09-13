@@ -9,7 +9,7 @@ Roxor[] roxes;
 void setup() {
   smooth();
   frameRate(30);
-  size(960, 1280);
+  size(320, 960);
   stroke(2.0);
   rectMode(CENTER);
   ellipseMode(CENTER);

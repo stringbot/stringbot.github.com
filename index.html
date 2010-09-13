@@ -3,13 +3,24 @@
   <head>
     <meta charset="utf-8">
     <title>☞Stringbot☜</title>
+    <script src="processing-0.9.6.js"></script>
     <style type="text/css" media="screen">
       body {
         background-color: #000000;
+      }
+      p#title {
         color: #DEDEDE;
         margin-top: 5em;
         font-family: Georgia;
         font-size: 32pt;
+      }
+      canvas#anim {
+        position:absolute;
+        top:0px;
+        left:0px;
+        border: 2px solid #0F0F0F;
+        float: left;
+        clear: right;
       }
       #horizon{
         text-align: center;
@@ -17,8 +28,9 @@
     </style>
   </head>
   <body>
+    <canvas id="anim" datasrc="partysquares.pde"></canvas>
     <div id="horizon">
-      <p>☞ Stringbot ☜</p>
+      <p id="title">☞ Stringbot ☜</p>
     </div>
   </body>
 </html>
