@@ -1,0 +1,363 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>p5.js Playground</title>
+
+<!-- p5.js -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.9.4/p5.min.js"></script>
+
+<!-- CodeMirror -->
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/codemirror.min.css">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/theme/material-darker.min.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/codemirror.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/mode/javascript/javascript.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/addon/edit/closebrackets.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/addon/edit/matchbrackets.min.js"></script>
+
+<style>
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; height: 100%;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    background: #1a1a1f; color: #e6e6e6;
+    overflow: hidden;
+  }
+  #app { display: flex; height: 100vh; width: 100vw; }
+
+  /* ---- Editor pane (left) ---- */
+  #editor-pane {
+    width: 420px; min-width: 240px; max-width: 70vw;
+    display: flex; flex-direction: column;
+    border-right: 1px solid #333;
+    background: #212126;
+  }
+  #editor-header {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 10px 14px; border-bottom: 1px solid #333;
+    font-size: 13px; font-weight: 600; letter-spacing: .3px;
+    color: #aab;
+  }
+  #editor-header .dot { color:#ff6b9d; }
+  #editor-header select, #editor-header button {
+    background:#2c2c33; color:#ddd; border:1px solid #444;
+    border-radius:6px; padding:4px 8px; font-size:12px; cursor:pointer;
+  }
+  #editor-header button { font-weight:600; }
+  #editor-header button:hover { background:#3a3a44; border-color:#5a5a66; }
+  #editor-header button:active { background:#ff6b9d; color:#1a1a1f; border-color:#ff6b9d; }
+  #editor-header button.dirty { border-color:#ff6b9d; color:#ff9ec0; }
+  .CodeMirror {
+    flex: 1; height: auto;
+    font-family: "SF Mono", Menlo, Consolas, monospace;
+    font-size: 13px; line-height: 1.5;
+  }
+  #status {
+    padding: 6px 14px; font-size: 12px; font-family: monospace;
+    border-top: 1px solid #333; min-height: 30px;
+    white-space: pre-wrap; max-height: 120px; overflow:auto;
+  }
+  #status.ok  { color: #6ee7a8; }
+  #status.err { color: #ff7a7a; background:#2a1f22; }
+
+  /* ---- Drag handle ---- */
+  #drag { width: 6px; cursor: col-resize; background: #2a2a30; }
+  #drag:hover { background: #3a3a44; }
+
+  /* ---- Canvas pane (right) ---- */
+  #canvas-pane {
+    flex: 1; display: flex; align-items: center; justify-content: center;
+    overflow: hidden; position: relative;
+    background:
+      radial-gradient(circle at 30% 20%, #26262e 0, #18181c 60%);
+  }
+  #canvas-holder canvas { display: block; box-shadow: 0 8px 40px rgba(0,0,0,.5); border-radius:4px; }
+  #hint {
+    position:absolute; bottom:10px; right:14px;
+    font-size:11px; color:#555; pointer-events:none;
+  }
+</style>
+</head>
+<body>
+<div id="app">
+  <div id="editor-pane">
+    <div id="editor-header">
+      <span><span class="dot">●</span> sketch.js</span>
+      <span style="display:flex; gap:8px; align-items:center;">
+      <button id="reload" title="Run (⌘R / Ctrl-R)">↻ Run</button>
+      <select id="examples" title="Load example">
+        <option value="">Examples…</option>
+        <option value="flow" selected>Oblique lines</option>
+        <option value="orbits">Orbiting particles</option>
+        <option value="noise">Noise terrain</option>
+        <option value="grid">Trig grid</option>
+      </select>
+      </span>
+    </div>
+    <textarea id="code"></textarea>
+    <div id="status" class="ok">Ready.</div>
+  </div>
+
+  <div id="drag"></div>
+
+  <div id="canvas-pane">
+    <div id="canvas-holder"></div>
+    <div id="hint">edits render live · auto-debounced</div>
+  </div>
+</div>
+
+<script>
+/* ----------------------------------------------------------------------
+   p5.js live playground
+   - User code is written in normal p5 "global" style (setup / draw / etc.)
+   - We run it through p5 instance mode so multiple reloads don't collide.
+---------------------------------------------------------------------- */
+
+const STARTER = `// 300 thin black lines on white.
+// Each line is parallel to one of 4 chosen angles:
+//   one perfectly horizontal, three oblique (never vertical).
+// Click to regenerate a new set of angles.
+
+const N = 300;
+
+function setup() {
+  createCanvas(800, 800);
+  pixelDensity(2);          // crisp sub-pixel strokes
+  noLoop();                 // static image
+}
+
+function draw() {
+  background(255);
+  stroke(0);
+  strokeWeight(0.25);       // quarter-pixel, antialiased
+
+  // Pick 4 angles: one horizontal, three oblique & non-vertical.
+  const angles = [0];
+  while (angles.length < 4) {
+    let a = random(PI);                 // 0..180 deg
+    let deg = degrees(a);
+    // avoid ~horizontal duplicates and anything ~vertical
+    if (deg > 12 && abs(deg - 90) > 12 && deg < 168) angles.push(a);
+  }
+
+  // Each angle gets a "center of gravity" — lines of that angle
+  // cluster near it. Gaussian spread keeps most lines close but lets
+  // a few stray far away.
+  const centers = angles.map(() => ({ x: random(width), y: random(height) }));
+  const spread = min(width, height) * 0.12;
+
+  for (let i = 0; i < N; i++) {
+    const idx = floor(random(angles.length));
+    const a = angles[idx];
+    const c = centers[idx];
+
+    // Distinct length per line; place near the cluster center via a
+    // Gaussian draw, retrying until both endpoints sit on the canvas.
+    let x1, y1, x2, y2, tries = 0;
+    do {
+      const len = random(30, 650);
+      x1 = c.x + randomGaussian() * spread;
+      y1 = c.y + randomGaussian() * spread;
+      x2 = x1 + cos(a) * len;
+      y2 = y1 + sin(a) * len;
+      tries++;
+    } while ((x1 < 0 || x1 > width || y1 < 0 || y1 > height ||
+              x2 < 0 || x2 > width || y2 < 0 || y2 > height) && tries < 60);
+    line(x1, y1, x2, y2);
+  }
+}
+
+function mousePressed() {
+  // Only regenerate when the click is on the canvas, not the editor.
+  if (mouseX >= 0 && mouseX <= width && mouseY >= 0 && mouseY <= height) {
+    redraw();               // new random angles + lines
+  }
+}
+`;
+
+/* ---- Example sketches ---- */
+const EXAMPLES = {
+flow: STARTER,
+
+orbits: `// Orbiting particles with additive trails
+let pts = [];
+function setup() {
+  createCanvas(800, 800);
+  colorMode(HSB, 360, 100, 100, 1);
+  background(8);
+  for (let i = 0; i < 220; i++) {
+    let r = random(40, 360);
+    pts.push({ r, a: random(TWO_PI), sp: random(0.002, 0.02), h: r % 360 });
+  }
+}
+function draw() {
+  noStroke();
+  fill(8, 0.08); rect(0,0,width,height);
+  translate(width/2, height/2);
+  for (let p of pts) {
+    p.a += p.sp;
+    let x = cos(p.a) * p.r;
+    let y = sin(p.a) * p.r * 0.6;
+    fill(p.h, 80, 100, 0.9);
+    circle(x, y, 3);
+  }
+}`,
+
+noise: `// Scrolling Perlin "terrain" of lines
+let yoff = 0;
+function setup() { createCanvas(800, 800); stroke(180, 220, 255); }
+function draw() {
+  background(12);
+  noFill();
+  let xoff = 0;
+  for (let y = 0; y < height; y += 14) {
+    beginShape();
+    xoff = yoff;
+    for (let x = 0; x <= width; x += 14) {
+      let n = noise(xoff, y * 0.01, frameCount * 0.004);
+      vertex(x, y + n * 60 - 30);
+      xoff += 0.05;
+    }
+    endShape();
+  }
+  yoff += 0.01;
+}`,
+
+grid: `// Pulsing trig grid
+function setup() { createCanvas(800, 800); noStroke(); colorMode(HSB,360,100,100); }
+function draw() {
+  background(10);
+  let s = 40, t = frameCount * 0.03;
+  for (let y = s/2; y < height; y += s) {
+    for (let x = s/2; x < width; x += s) {
+      let d = dist(x, y, width/2, height/2);
+      let r = (sin(d * 0.03 - t) + 1) * 12 + 4;
+      fill((d + frameCount) % 360, 70, 100);
+      circle(x, y, r);
+    }
+  }
+}`
+};
+
+/* ---- p5 event handlers we forward from user code ---- */
+const P5_EVENTS = [
+  "setup","draw","preload","mousePressed","mouseReleased","mouseClicked",
+  "mouseMoved","mouseDragged","mouseWheel","doubleClicked",
+  "keyPressed","keyReleased","keyTyped","windowResized",
+  "touchStarted","touchMoved","touchEnded"
+];
+
+let currentInstance = null;
+const holder = document.getElementById("canvas-holder");
+const statusEl = document.getElementById("status");
+
+function setStatus(msg, ok) {
+  statusEl.textContent = msg;
+  statusEl.className = ok ? "ok" : "err";
+}
+
+function run(code) {
+  // tear down previous sketch
+  if (currentInstance) {
+    try { currentInstance.remove(); } catch (e) {}
+    currentInstance = null;
+  }
+  holder.innerHTML = "";
+
+  try {
+    const sketch = function (p) {
+      // Expose the user's code in a scope where bare p5 calls (createCanvas,
+      // background, etc.) resolve to this instance via `with`.
+      with (p) {
+        try {
+          eval(code);
+        } catch (e) {
+          reportError(e);
+          return;
+        }
+        // Attach any handlers the user defined to the instance.
+        for (const name of P5_EVENTS) {
+          try {
+            if (typeof eval(name) === "function") {
+              p[name] = eval(name);
+            }
+          } catch (e) { /* not defined */ }
+        }
+      }
+    };
+    currentInstance = new p5(sketch, holder);
+    setStatus("Running ✓  " + new Date().toLocaleTimeString(), true);
+  } catch (e) {
+    reportError(e);
+  }
+}
+
+function reportError(e) {
+  setStatus((e && e.stack ? e.stack : String(e)).split("\n").slice(0,4).join("\n"), false);
+}
+
+// Catch async/runtime errors thrown inside draw().
+window.addEventListener("error", (ev) => {
+  reportError(ev.error || ev.message);
+});
+
+/* ---- CodeMirror editor ---- */
+const editor = CodeMirror.fromTextArea(document.getElementById("code"), {
+  mode: "javascript",
+  theme: "material-darker",
+  lineNumbers: true,
+  autoCloseBrackets: true,
+  matchBrackets: true,
+  tabSize: 2,
+  indentUnit: 2,
+});
+editor.setValue(STARTER);
+
+// Manual reload only — no auto-run on edit.
+const reloadBtn = document.getElementById("reload");
+
+function reload() {
+  run(editor.getValue());
+  reloadBtn.classList.remove("dirty");
+}
+reloadBtn.addEventListener("click", reload);
+
+// Mark the Run button when there are unrun edits.
+editor.on("change", () => reloadBtn.classList.add("dirty"));
+
+// ⌘R / Ctrl-R triggers a run instead of reloading the browser.
+window.addEventListener("keydown", (e) => {
+  if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "r") {
+    e.preventDefault();
+    reload();
+  }
+});
+
+// Example selector
+document.getElementById("examples").addEventListener("change", (e) => {
+  const key = e.target.value;
+  if (key && EXAMPLES[key]) {
+    editor.setValue(EXAMPLES[key]);
+    run(editor.getValue());
+  }
+  e.target.value = "";
+});
+
+/* ---- Draggable splitter ---- */
+const drag = document.getElementById("drag");
+const pane = document.getElementById("editor-pane");
+let dragging = false;
+drag.addEventListener("mousedown", () => { dragging = true; document.body.style.userSelect = "none"; });
+window.addEventListener("mousemove", (e) => {
+  if (!dragging) return;
+  const w = Math.min(Math.max(e.clientX, 240), window.innerWidth * 0.7);
+  pane.style.width = w + "px";
+});
+window.addEventListener("mouseup", () => { dragging = false; document.body.style.userSelect = ""; });
+
+/* ---- First run ---- */
+run(STARTER);
+</script>
+</body>
+</html>
